@@ -73,8 +73,9 @@ jobs:
           RELEASE_DATA=$(curl -sSL \
             "https://api.github.com/repos/userdocs/qbittorrent-nox-static/releases/latest")
 
-          DOWNLOAD_URL=$(echo "$RELEASE_DATA" | jq -r \
-            '.assets[] | select(.name | contains("x86_64-linux-musl-static")) | .browser_download_url' | head -n1)
+DOWNLOAD_URL=$(echo "$RELEASE_DATA" | jq -r \
+  '.assets[] | select(.name | test("qbittorrent-nox.*x86_64.*musl.*\\.tar\\.xz$")) | .browser_download_url' | head -n1)
+
 
           if [ -z "$DOWNLOAD_URL" ]; then
             echo "未找到 x86_64-linux-musl-static 资产"
