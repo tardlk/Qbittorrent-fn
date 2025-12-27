@@ -1,0 +1,31 @@
+id: qbittorrent
+name: Qbittorrent
+version: 0.0.0
+arch: amd64
+
+description: |
+  Qbittorrent-nox 静态构建版本，适用于飞牛 NAS。
+  自动化构建来源：userdocs/qbittorrent-nox-static。
+
+developer: "tardlk"
+website: "https://www.qbittorrent.org/"
+license: "GPLv3"
+
+category: "download"
+
+permissions:
+  network: true
+
+ports:
+  - name: webui
+    protocol: tcp
+    port: 8080
+    description: "Qbittorrent Web UI"
+
+volumes:
+  - name: data
+    path: /data
+
+env:
+  - key: QBT_PROFILE
+    value: "/data"
