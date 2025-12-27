@@ -1,0 +1,8 @@
+#!/bin/sh
+
+# 飞牛会执行这个文件作为应用入口
+# 我们在这里启动真正的 qbittorrent-nox
+
+exec /app/bin/qbittorrent-nox \
+    --profile="${APP_DATA}" \
+    --webui-port="${APP_PORT_WEBUI}"
