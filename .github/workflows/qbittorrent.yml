@@ -30,14 +30,8 @@ jobs:
       - name: 读取本地 manifest 版本
         id: local_ver
         run: |
-          if [ -f "Qbittorrent/manifest" ]; then
-            LOCAL_VERSION=$(sed -n 's/^[[:space:]]*version[[:space:]]*[:=][[:space:]]*//p' Qbittorrent/manifest \
-              | tr -d '"' | tr -d "'" | sed 's/^v//' | xargs)
-          else
-            mkdir -p Qbittorrent
-            echo "version: 0.0.0" > Qbittorrent/manifest
-            LOCAL_VERSION="0.0.0"
-          fi
+          LOCAL_VERSION=$(sed -n 's/^[[:space:]]*version[[:space:]]*[:=][[:space:]]*//p' Qbittorrent/manifest \
+            | tr -d '"' | tr -d "'" | sed 's/^v//' | xargs)
           echo "local_version=$LOCAL_VERSION" >> $GITHUB_OUTPUT
 
       - name: 获取远程最新版本（userdocs/qbittorrent-nox-static）
@@ -73,26 +67,33 @@ jobs:
           RELEASE_DATA=$(curl -sSL \
             "https://api.github.com/repos/userdocs/qbittorrent-nox-static/releases/latest")
 
-DOWNLOAD_URL=$(echo "$RELEASE_DATA" | jq -r \
-  '.assets[] | select(.name | test("qbittorrent-nox.*x86_64.*musl.*\\.tar\\.xz$")) | .browser_download_url' | head -n1)
-
+          # 自动匹配最新 x86_64 musl 静态构建
+          DOWNLOAD_URL=$(echo "$RELEASE_DATA" | jq -r \
+            '.assets[] | select(.name | test("qbittorrent-nox.*x86_64.*musl.*\\.tar\\.xz$")) | .browser_download_url' | head -n1)
 
           if [ -z "$DOWNLOAD_URL" ]; then
-            echo "未找到 x86_64-linux-musl-static 资产"
+            echo "未找到 x86_64 musl 静态构建资产"
+            echo "可用资产列表："
+            echo "$RELEASE_DATA" | jq -r '.assets[].name'
             exit 1
           fi
+
+          echo "下载地址: $DOWNLOAD_URL"
 
           mkdir -p Qbittorrent/app/bin
           curl -SL -o /tmp/qb.tar.xz "$DOWNLOAD_URL"
           tar -xf /tmp/qb.tar.xz -C /tmp
 
-          if [ ! -f "/tmp/qbittorrent-nox" ]; then
+          # 自动查找 qbittorrent-nox 可执行文件
+          QB_BIN=$(find /tmp -maxdepth 3 -type f -name "qbittorrent-nox" | head -n1)
+
+          if [ -z "$QB_BIN" ]; then
             echo "未找到 qbittorrent-nox 可执行文件"
-            ls -lah /tmp
+            find /tmp -maxdepth 3 -type f
             exit 1
           fi
 
-          mv /tmp/qbittorrent-nox Qbittorrent/app/bin/
+          mv "$QB_BIN" Qbittorrent/app/bin/qbittorrent-nox
           chmod +x Qbittorrent/app/bin/qbittorrent-nox
 
       - name: 更新 manifest 版本
