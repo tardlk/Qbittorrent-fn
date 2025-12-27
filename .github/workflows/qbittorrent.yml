@@ -1,0 +1,145 @@
+name: 自动打包 Qbittorrent fpk 并上传 Release
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 配置 Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: 安装依赖
+        run: |
+          sudo apt update && sudo apt install -y jq curl sed xz-utils
+
+      # ===================== 版本检测 =====================
+      - name: 读取本地 manifest 版本
+        id: local_ver
+        run: |
+          if [ -f "Qbittorrent/manifest" ]; then
+            LOCAL_VERSION=$(sed -n 's/^[[:space:]]*version[[:space:]]*[:=][[:space:]]*//p' Qbittorrent/manifest \
+              | tr -d '"' | tr -d "'" | sed 's/^v//' | xargs)
+          else
+            mkdir -p Qbittorrent
+            echo "version: 0.0.0" > Qbittorrent/manifest
+            LOCAL_VERSION="0.0.0"
+          fi
+          echo "local_version=$LOCAL_VERSION" >> $GITHUB_OUTPUT
+
+      - name: 获取远程最新版本（userdocs/qbittorrent-nox-static）
+        id: remote_ver
+        run: |
+          REMOTE_VERSION=$(curl -sSL \
+            "https://api.github.com/repos/userdocs/qbittorrent-nox-static/releases/latest" \
+            | jq -r '.tag_name' | sed 's/^v//' | xargs)
+
+          if [ -z "$REMOTE_VERSION" ] || [ "$REMOTE_VERSION" = "null" ]; then
+            echo "获取远程版本失败"
+            exit 1
+          fi
+
+          echo "remote_version=$REMOTE_VERSION" >> $GITHUB_OUTPUT
+          echo "arch=Linux-AMD64" >> $GITHUB_OUTPUT
+
+      - name: 比较版本
+        id: compare
+        run: |
+          if [ "${{ steps.local_ver.outputs.local_version }}" = "${{ steps.remote_ver.outputs.remote_version }}" ]; then
+            echo "need_update=false" >> $GITHUB_OUTPUT
+            echo "版本一致，无需更新"
+          else
+            echo "need_update=true" >> $GITHUB_OUTPUT
+            echo "版本不一致，开始更新"
+          fi
+
+      # ===================== 下载并打包 =====================
+      - name: 下载 Qbittorrent 静态构建
+        if: steps.compare.outputs.need_update == 'true'
+        run: |
+          RELEASE_DATA=$(curl -sSL \
+            "https://api.github.com/repos/userdocs/qbittorrent-nox-static/releases/latest")
+
+          DOWNLOAD_URL=$(echo "$RELEASE_DATA" | jq -r \
+            '.assets[] | select(.name | contains("x86_64-linux-musl-static")) | .browser_download_url' | head -n1)
+
+          if [ -z "$DOWNLOAD_URL" ]; then
+            echo "未找到 x86_64-linux-musl-static 资产"
+            exit 1
+          fi
+
+          mkdir -p Qbittorrent/app/bin
+          curl -SL -o /tmp/qb.tar.xz "$DOWNLOAD_URL"
+          tar -xf /tmp/qb.tar.xz -C /tmp
+
+          if [ ! -f "/tmp/qbittorrent-nox" ]; then
+            echo "未找到 qbittorrent-nox 可执行文件"
+            ls -lah /tmp
+            exit 1
+          fi
+
+          mv /tmp/qbittorrent-nox Qbittorrent/app/bin/
+          chmod +x Qbittorrent/app/bin/qbittorrent-nox
+
+      - name: 更新 manifest 版本
+        if: steps.compare.outputs.need_update == 'true'
+        run: |
+          sed -i -E \
+            "s/(version[[:space:]]*[:=][[:space:]]*)([0-9a-zA-Z.]+)/\1${{ steps.remote_ver.outputs.remote_version }}/" \
+            Qbittorrent/manifest
+
+          git add Qbittorrent/manifest
+          git commit -m "更新 Qbittorrent 版本至 ${{ steps.remote_ver.outputs.remote_version }}" || true
+          git push
+
+      - name: 安装 fnpack
+        if: steps.compare.outputs.need_update == 'true'
+        run: |
+          curl -SL -o /usr/local/bin/fnpack "https://static2.fnnas.com/fnpack/fnpack-1.0.4-linux-amd64"
+          chmod +x /usr/local/bin/fnpack
+
+      - name: 打包 fpk
+        if: steps.compare.outputs.need_update == 'true'
+        id: build_fpk
+        run: |
+          cd Qbittorrent
+          fnpack build
+
+          FPK_FILE=$(find . -name "*.fpk" -type f | head -n1)
+          FPK_FULL_PATH=$(pwd)/$FPK_FILE
+
+          FPK_VERSION_NAME="fpk-qbittorrent-v${{ steps.remote_ver.outputs.remote_version }}-${{ steps.remote_ver.outputs.arch }}.fpk"
+
+          cp "$FPK_FULL_PATH" /tmp/$FPK_VERSION_NAME
+
+          echo "fpk_release_file=/tmp/$FPK_VERSION_NAME" >> $GITHUB_OUTPUT
+
+      # ===================== 上传 Release =====================
+      - name: 上传 Release
+        if: steps.compare.outputs.need_update == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "qbittorrent-v${{ steps.remote_ver.outputs.remote_version }}-${{ steps.remote_ver.outputs.arch }}"
+          name: "Qbittorrent v${{ steps.remote_ver.outputs.remote_version }}"
+          body: |
+            自动打包 Qbittorrent fpk
+            - 版本：${{ steps.remote_ver.outputs.remote_version }}
+            - 架构：${{ steps.remote_ver.outputs.arch }}
+            - 打包工具：fnpack 1.0.4
+          files: ${{ steps.build_fpk.outputs.fpk_release_file }}
+          overwrite: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
