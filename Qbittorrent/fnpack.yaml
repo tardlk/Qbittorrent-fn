@@ -1,0 +1,15 @@
+id: qbittorrent
+name: Qbittorrent
+arch: amd64
+version_from: manifest
+
+entry:
+  bin: app/bin/qbittorrent-nox
+  args:
+    - "--profile=${APP_DATA}"
+    - "--webui-port=${APP_PORT_WEBUI}"
+
+install:
+  paths:
+    - app/bin
+    - app/data
